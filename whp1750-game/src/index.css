@@ -1,0 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-parchment text-ink font-sans;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(176,141,87,0.08), transparent 40%),
+    radial-gradient(circle at 80% 0%, rgba(31,51,80,0.06), transparent 45%);
+}
+
+.map-pin {
+  transition: transform 120ms ease, filter 120ms ease;
+}
+.map-pin:hover {
+  transform: scale(1.15);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #b08d57;
+  border-radius: 8px;
+}
