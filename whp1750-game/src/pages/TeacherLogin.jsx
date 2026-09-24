@@ -17,7 +17,9 @@ export default function TeacherLogin() {
     setLoading(true)
 
     if (mode === 'signup') {
-      const { data, error: signUpErr } = await supabase.auth.signUp({ email, password })
+      const { data, error: signUpErr } = await supabase.auth.signUp({
+        email, password, options: { data: { name } },
+      })
       if (signUpErr) { setError(signUpErr.message); setLoading(false); return }
 
       if (data.user) {
