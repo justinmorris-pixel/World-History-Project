@@ -25,6 +25,7 @@ export default function TeacherDashboard() {
   const [classUnits, setClassUnits] = useState({}) // unit_id -> is_open
 
   const [progress, setProgress] = useState([])
+  const [error, setError] = useState('')
 
   const [contentUnit, setContentUnit] = useState(null)
   const [locations, setLocations] = useState([])
@@ -36,6 +37,26 @@ export default function TeacherDashboard() {
     const { data: { user: authUser } } = await supabase.auth.getUser()
     if (!authUser) { navigate('/teacher/login'); return }
     setUser(authUser)
+
+    // Self-heal: if signup's whp_teachers insert didn't land (e.g. it ran
+    // before email confirmation, when there was no session yet to satisfy
+    // the RLS check), create it now that we have a real session.
+    const { data: existingTeacher } = await supabase
+      .from('whp_teachers')
+      .select('id')
+      .eq('id', authUser.id)
+      .maybeSingle()
+    if (!existingTeacher) {
+      const { error: teacherInsertErr } = await supabase.from('whp_teachers').insert({
+        id: authUser.id,
+        name: authUser.user_metadata?.name || authUser.email,
+        email: authUser.email,
+      })
+      if (teacherInsertErr) {
+        setError(`Couldn't set up your teacher profile: ${teacherInsertErr.message}`)
+      }
+    }
+
     const { data: unitRows } = await supabase.from('whp_units').select('*').order('unit_number')
     setUnits(unitRows || [])
     if (unitRows?.length) setContentUnit(unitRows[0])
@@ -65,17 +86,20 @@ export default function TeacherDashboard() {
   async function handleCreateClass(e) {
     e.preventDefault()
     if (!newClassName.trim()) return
+    setError('')
     const code = randomClassCode()
-    const { data, error } = await supabase
+    const { data, error: insertErr } = await supabase
       .from('whp_classes')
       .insert({ teacher_id: user.id, name: newClassName.trim(), class_code: code })
       .select()
       .single()
-    if (!error) {
-      setNewClassName('')
-      await loadClasses()
-      selectClass(data)
+    if (insertErr) {
+      setError(`Couldn't create the class: ${insertErr.message}`)
+      return
     }
+    setNewClassName('')
+    await loadClasses()
+    selectClass(data)
   }
 
   async function handleAddStudent(e) {
@@ -158,6 +182,12 @@ export default function TeacherDashboard() {
         </div>
         <button onClick={handleSignOut} className="text-sm text-navy/60 hover:underline">Sign out</button>
       </div>
+
+      {error && (
+        <div className="mb-4 text-sm text-rust bg-rust/10 border border-rust/30 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
 
       <div className="flex gap-2 mb-6">
         <button
