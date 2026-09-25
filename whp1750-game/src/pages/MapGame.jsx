@@ -12,7 +12,7 @@ export default function MapGame() {
   const [loading, setLoading] = useState(true)
   const [target, setTarget] = useState(null)
   const [flash, setFlash] = useState(null) // { location_id, kind: 'correct' | 'wrong' }
-  const [lastFact, setLastFact] = useState(null)
+  const [factModal, setFactModal] = useState(null) // { name, fun_fact } | null
 
   useEffect(() => {
     if (!session) { navigate('/join'); return }
@@ -62,7 +62,7 @@ export default function MapGame() {
   }, [locations, activeGroup, flash])
 
   async function handlePinClick(pin) {
-    if (!target || pin.mastered) return
+    if (!target || pin.mastered || factModal) return
     const correct = pin.location_id === target.location_id
     setFlash({ location_id: pin.location_id, kind: correct ? 'correct' : 'wrong' })
 
@@ -74,14 +74,20 @@ export default function MapGame() {
     })
 
     if (correct) {
-      setLastFact(pin.fun_fact)
-      setTimeout(async () => {
+      // Block on the fun fact — students must click Continue to proceed,
+      // rather than it auto-advancing under a timer.
+      setTimeout(() => {
         setFlash(null)
-        await loadState()
-      }, 700)
+        setFactModal({ name: pin.name, fun_fact: pin.fun_fact })
+      }, 500)
     } else {
       setTimeout(() => setFlash(null), 500)
     }
+  }
+
+  async function handleContinue() {
+    setFactModal(null)
+    await loadState()
   }
 
   if (!session) return null
@@ -118,13 +124,24 @@ export default function MapGame() {
           </div>
 
           <WorldMap pins={pins} onPinClick={handlePinClick} />
-
-          {lastFact && (
-            <div className="mt-4 bg-forest/10 border border-forest/30 rounded-lg px-4 py-3 text-sm text-forest">
-              {lastFact}
-            </div>
-          )}
         </>
+      )}
+
+      {factModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-6">
+          <div className="w-full max-w-md bg-parchment border border-brass/40 rounded-2xl shadow-2xl p-8 text-center">
+            <p className="text-4xl mb-3">📍</p>
+            <p className="text-xs uppercase tracking-wide text-brass font-semibold mb-1">You found it</p>
+            <h3 className="font-serif text-2xl font-bold text-ink mb-3">{factModal.name}</h3>
+            <p className="text-ink/80 text-sm leading-relaxed mb-6">{factModal.fun_fact}</p>
+            <button
+              onClick={handleContinue}
+              className="w-full py-3 rounded-lg bg-rust text-parchment font-semibold"
+            >
+              Continue
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )
