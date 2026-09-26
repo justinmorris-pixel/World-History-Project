@@ -25,11 +25,15 @@ export default function TeacherDashboard() {
   const [classUnits, setClassUnits] = useState({}) // unit_id -> is_open
 
   const [progress, setProgress] = useState([])
+  const [vocabProgress, setVocabProgress] = useState([])
   const [error, setError] = useState('')
 
   const [contentUnit, setContentUnit] = useState(null)
+  const [contentMode, setContentMode] = useState('locations') // locations | vocab
   const [locations, setLocations] = useState([])
   const [locDraft, setLocDraft] = useState(null) // location being added/edited
+  const [vocabTerms, setVocabTerms] = useState([])
+  const [vocabDraft, setVocabDraft] = useState(null) // vocab term being added/edited
 
   useEffect(() => { init() }, [])
 
@@ -71,16 +75,18 @@ export default function TeacherDashboard() {
 
   async function selectClass(cls) {
     setActiveClass(cls)
-    const [{ data: studentRows }, { data: cuRows }, { data: progressRows }] = await Promise.all([
+    const [{ data: studentRows }, { data: cuRows }, { data: progressRows }, { data: vocabProgressRows }] = await Promise.all([
       supabase.from('whp_students').select('*').eq('class_id', cls.id).order('name'),
       supabase.from('whp_class_units').select('*').eq('class_id', cls.id),
       supabase.rpc('whp_teacher_progress', { p_class_id: cls.id }),
+      supabase.rpc('whp_teacher_vocab_progress', { p_class_id: cls.id }),
     ])
     setRoster(studentRows || [])
     const map = {}
     ;(cuRows || []).forEach((r) => { map[r.unit_id] = r.is_open })
     setClassUnits(map)
     setProgress(progressRows || [])
+    setVocabProgress(vocabProgressRows || [])
   }
 
   async function handleCreateClass(e) {
@@ -134,10 +140,28 @@ export default function TeacherDashboard() {
     setLocations(data || [])
   }
 
+  async function loadVocabTerms(unit) {
+    setContentUnit(unit)
+    const { data } = await supabase
+      .from('whp_vocab_terms')
+      .select('*')
+      .eq('unit_id', unit.id)
+      .order('lesson_number')
+      .order('term')
+    setVocabTerms(data || [])
+  }
+
+  function selectContentUnit(unit) {
+    if (contentMode === 'vocab') loadVocabTerms(unit)
+    else loadLocations(unit)
+  }
+
   useEffect(() => {
-    if (contentUnit && tab === 'content') loadLocations(contentUnit)
+    if (!contentUnit || tab !== 'content') return
+    if (contentMode === 'vocab') loadVocabTerms(contentUnit)
+    else loadLocations(contentUnit)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab])
+  }, [tab, contentMode])
 
   function startNewLocation() {
     setLocDraft({ unit_id: contentUnit.id, name: '', region: '', lat: '', lng: '', group_number: 1, fun_fact: '' })
@@ -164,6 +188,31 @@ export default function TeacherDashboard() {
   async function deleteLocation(id) {
     await supabase.from('whp_unit_locations').delete().eq('id', id)
     loadLocations(contentUnit)
+  }
+
+  function startNewVocabTerm() {
+    setVocabDraft({ unit_id: contentUnit.id, term: '', definition: '', example_sentence: '', lesson_number: 1 })
+  }
+
+  async function saveVocabTerm(e) {
+    e.preventDefault()
+    const payload = {
+      ...vocabDraft,
+      lesson_number: parseInt(vocabDraft.lesson_number, 10),
+    }
+    if (vocabDraft.id) {
+      await supabase.from('whp_vocab_terms').update(payload).eq('id', vocabDraft.id)
+    } else {
+      delete payload.id
+      await supabase.from('whp_vocab_terms').insert(payload)
+    }
+    setVocabDraft(null)
+    loadVocabTerms(contentUnit)
+  }
+
+  async function deleteVocabTerm(id) {
+    await supabase.from('whp_vocab_terms').delete().eq('id', id)
+    loadVocabTerms(contentUnit)
   }
 
   async function handleSignOut() {
@@ -275,7 +324,7 @@ export default function TeacherDashboard() {
               </div>
 
               <div className="bg-white/70 border border-brass/30 rounded-xl p-5 overflow-x-auto">
-                <h3 className="font-serif text-lg font-bold mb-3">Progress</h3>
+                <h3 className="font-serif text-lg font-bold mb-3">Progress — Map Quest</h3>
                 {progress.length === 0 ? (
                   <p className="text-sm text-ink/50">No progress yet.</p>
                 ) : (
@@ -299,6 +348,32 @@ export default function TeacherDashboard() {
                   </table>
                 )}
               </div>
+
+              <div className="bg-white/70 border border-brass/30 rounded-xl p-5 overflow-x-auto">
+                <h3 className="font-serif text-lg font-bold mb-3">Progress — Vocabulary</h3>
+                {vocabProgress.length === 0 ? (
+                  <p className="text-sm text-ink/50">No progress yet.</p>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-ink/50">
+                        <th className="pb-2 pr-4">Student</th>
+                        <th className="pb-2 pr-4">Unit</th>
+                        <th className="pb-2">Mastered</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vocabProgress.filter((p) => p.total_count > 0 && classUnits[p.unit_id]).map((p, i) => (
+                        <tr key={i} className="border-t border-brass/10">
+                          <td className="py-1 pr-4">{p.student_name}</td>
+                          <td className="py-1 pr-4">Unit {p.unit_number}</td>
+                          <td className="py-1">{p.mastered_count} / {p.total_count}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -306,76 +381,147 @@ export default function TeacherDashboard() {
 
       {tab === 'content' && (
         <div className="grid md:grid-cols-[220px_1fr] gap-6">
-          <div className="space-y-1">
-            {units.map((u) => (
+          <div className="space-y-3">
+            <div className="flex gap-1 p-1 bg-white/50 rounded-lg">
               <button
-                key={u.id}
-                onClick={() => loadLocations(u)}
-                className={`w-full text-left px-3 py-2 rounded-lg text-sm ${contentUnit?.id === u.id ? 'bg-brass/20 font-semibold' : 'hover:bg-white/50'}`}
+                onClick={() => setContentMode('locations')}
+                className={`flex-1 py-1.5 rounded-md text-xs font-semibold ${contentMode === 'locations' ? 'bg-navy text-parchment' : 'text-ink/60'}`}
               >
-                Unit {u.unit_number}: {u.title}
+                🗺️ Locations
               </button>
-            ))}
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-serif text-lg font-bold">
-                {contentUnit ? `Unit ${contentUnit.unit_number}: ${contentUnit.title}` : ''}
-              </h3>
               <button
-                onClick={startNewLocation}
-                className="px-3 py-2 rounded-lg bg-forest text-parchment text-sm font-semibold"
+                onClick={() => setContentMode('vocab')}
+                className={`flex-1 py-1.5 rounded-md text-xs font-semibold ${contentMode === 'vocab' ? 'bg-navy text-parchment' : 'text-ink/60'}`}
               >
-                + Add Location
+                📚 Vocabulary
               </button>
             </div>
-
-            {locDraft && (
-              <form onSubmit={saveLocation} className="bg-white/70 border border-brass/30 rounded-xl p-4 space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <input required placeholder="Name" value={locDraft.name}
-                    onChange={(e) => setLocDraft({ ...locDraft, name: e.target.value })}
-                    className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
-                  <input placeholder="Region" value={locDraft.region}
-                    onChange={(e) => setLocDraft({ ...locDraft, region: e.target.value })}
-                    className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
-                  <input required type="number" step="any" placeholder="Latitude" value={locDraft.lat}
-                    onChange={(e) => setLocDraft({ ...locDraft, lat: e.target.value })}
-                    className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
-                  <input required type="number" step="any" placeholder="Longitude" value={locDraft.lng}
-                    onChange={(e) => setLocDraft({ ...locDraft, lng: e.target.value })}
-                    className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
-                  <input required type="number" min="1" placeholder="Group #" value={locDraft.group_number}
-                    onChange={(e) => setLocDraft({ ...locDraft, group_number: e.target.value })}
-                    className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
-                </div>
-                <textarea placeholder="Fun fact shown after mastering" value={locDraft.fun_fact}
-                  onChange={(e) => setLocDraft({ ...locDraft, fun_fact: e.target.value })}
-                  className="w-full rounded-lg border border-brass/40 px-3 py-2 text-sm" rows={2} />
-                <div className="flex gap-2">
-                  <button className="px-4 py-2 rounded-lg bg-rust text-parchment text-sm font-semibold">Save</button>
-                  <button type="button" onClick={() => setLocDraft(null)} className="px-4 py-2 rounded-lg bg-white text-ink text-sm border border-brass/30">Cancel</button>
-                </div>
-              </form>
-            )}
-
             <div className="space-y-1">
-              {locations.map((l) => (
-                <div key={l.id} className="flex items-center justify-between text-sm bg-white/60 rounded-lg px-3 py-2">
-                  <div>
-                    <span className="font-semibold">{l.name}</span>
-                    <span className="text-ink/50"> — group {l.group_number}{l.region ? ` · ${l.region}` : ''}</span>
-                  </div>
-                  <div className="flex gap-3">
-                    <button onClick={() => setLocDraft(l)} className="text-navy text-xs hover:underline">edit</button>
-                    <button onClick={() => deleteLocation(l.id)} className="text-rust text-xs hover:underline">delete</button>
-                  </div>
-                </div>
+              {units.map((u) => (
+                <button
+                  key={u.id}
+                  onClick={() => selectContentUnit(u)}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm ${contentUnit?.id === u.id ? 'bg-brass/20 font-semibold' : 'hover:bg-white/50'}`}
+                >
+                  Unit {u.unit_number}: {u.title}
+                </button>
               ))}
-              {locations.length === 0 && <p className="text-sm text-ink/50">No locations yet for this unit.</p>}
             </div>
           </div>
+
+          {contentMode === 'locations' ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-serif text-lg font-bold">
+                  {contentUnit ? `Unit ${contentUnit.unit_number}: ${contentUnit.title}` : ''}
+                </h3>
+                <button
+                  onClick={startNewLocation}
+                  className="px-3 py-2 rounded-lg bg-forest text-parchment text-sm font-semibold"
+                >
+                  + Add Location
+                </button>
+              </div>
+
+              {locDraft && (
+                <form onSubmit={saveLocation} className="bg-white/70 border border-brass/30 rounded-xl p-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <input required placeholder="Name" value={locDraft.name}
+                      onChange={(e) => setLocDraft({ ...locDraft, name: e.target.value })}
+                      className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
+                    <input placeholder="Region" value={locDraft.region}
+                      onChange={(e) => setLocDraft({ ...locDraft, region: e.target.value })}
+                      className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
+                    <input required type="number" step="any" placeholder="Latitude" value={locDraft.lat}
+                      onChange={(e) => setLocDraft({ ...locDraft, lat: e.target.value })}
+                      className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
+                    <input required type="number" step="any" placeholder="Longitude" value={locDraft.lng}
+                      onChange={(e) => setLocDraft({ ...locDraft, lng: e.target.value })}
+                      className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
+                    <input required type="number" min="1" placeholder="Group #" value={locDraft.group_number}
+                      onChange={(e) => setLocDraft({ ...locDraft, group_number: e.target.value })}
+                      className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
+                  </div>
+                  <textarea placeholder="Fun fact shown after mastering" value={locDraft.fun_fact}
+                    onChange={(e) => setLocDraft({ ...locDraft, fun_fact: e.target.value })}
+                    className="w-full rounded-lg border border-brass/40 px-3 py-2 text-sm" rows={2} />
+                  <div className="flex gap-2">
+                    <button className="px-4 py-2 rounded-lg bg-rust text-parchment text-sm font-semibold">Save</button>
+                    <button type="button" onClick={() => setLocDraft(null)} className="px-4 py-2 rounded-lg bg-white text-ink text-sm border border-brass/30">Cancel</button>
+                  </div>
+                </form>
+              )}
+
+              <div className="space-y-1">
+                {locations.map((l) => (
+                  <div key={l.id} className="flex items-center justify-between text-sm bg-white/60 rounded-lg px-3 py-2">
+                    <div>
+                      <span className="font-semibold">{l.name}</span>
+                      <span className="text-ink/50"> — group {l.group_number}{l.region ? ` · ${l.region}` : ''}</span>
+                    </div>
+                    <div className="flex gap-3">
+                      <button onClick={() => setLocDraft(l)} className="text-navy text-xs hover:underline">edit</button>
+                      <button onClick={() => deleteLocation(l.id)} className="text-rust text-xs hover:underline">delete</button>
+                    </div>
+                  </div>
+                ))}
+                {locations.length === 0 && <p className="text-sm text-ink/50">No locations yet for this unit.</p>}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="font-serif text-lg font-bold">
+                  {contentUnit ? `Unit ${contentUnit.unit_number}: ${contentUnit.title}` : ''}
+                </h3>
+                <button
+                  onClick={startNewVocabTerm}
+                  className="px-3 py-2 rounded-lg bg-forest text-parchment text-sm font-semibold"
+                >
+                  + Add Term
+                </button>
+              </div>
+
+              {vocabDraft && (
+                <form onSubmit={saveVocabTerm} className="bg-white/70 border border-brass/30 rounded-xl p-4 space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <input required placeholder="Term" value={vocabDraft.term}
+                      onChange={(e) => setVocabDraft({ ...vocabDraft, term: e.target.value })}
+                      className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
+                    <input required type="number" min="1" placeholder="Lesson #" value={vocabDraft.lesson_number}
+                      onChange={(e) => setVocabDraft({ ...vocabDraft, lesson_number: e.target.value })}
+                      className="rounded-lg border border-brass/40 px-3 py-2 text-sm" />
+                  </div>
+                  <textarea required placeholder="Definition" value={vocabDraft.definition}
+                    onChange={(e) => setVocabDraft({ ...vocabDraft, definition: e.target.value })}
+                    className="w-full rounded-lg border border-brass/40 px-3 py-2 text-sm" rows={2} />
+                  <textarea placeholder="Example sentence (shown after a correct answer)" value={vocabDraft.example_sentence}
+                    onChange={(e) => setVocabDraft({ ...vocabDraft, example_sentence: e.target.value })}
+                    className="w-full rounded-lg border border-brass/40 px-3 py-2 text-sm" rows={2} />
+                  <div className="flex gap-2">
+                    <button className="px-4 py-2 rounded-lg bg-rust text-parchment text-sm font-semibold">Save</button>
+                    <button type="button" onClick={() => setVocabDraft(null)} className="px-4 py-2 rounded-lg bg-white text-ink text-sm border border-brass/30">Cancel</button>
+                  </div>
+                </form>
+              )}
+
+              <div className="space-y-1">
+                {vocabTerms.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between text-sm bg-white/60 rounded-lg px-3 py-2">
+                    <div>
+                      <span className="font-semibold">{t.term}</span>
+                      <span className="text-ink/50"> — lesson {t.lesson_number}</span>
+                    </div>
+                    <div className="flex gap-3">
+                      <button onClick={() => setVocabDraft(t)} className="text-navy text-xs hover:underline">edit</button>
+                      <button onClick={() => deleteVocabTerm(t.id)} className="text-rust text-xs hover:underline">delete</button>
+                    </div>
+                  </div>
+                ))}
+                {vocabTerms.length === 0 && <p className="text-sm text-ink/50">No vocabulary terms yet for this unit.</p>}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
