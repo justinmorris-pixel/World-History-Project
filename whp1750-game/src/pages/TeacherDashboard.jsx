@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase.js'
 
@@ -26,6 +26,7 @@ export default function TeacherDashboard() {
 
   const [progress, setProgress] = useState([])
   const [vocabProgress, setVocabProgress] = useState([])
+  const [progressMode, setProgressMode] = useState('map') // map | vocab
   const [error, setError] = useState('')
 
   const [contentUnit, setContentUnit] = useState(null)
@@ -34,6 +35,37 @@ export default function TeacherDashboard() {
   const [locDraft, setLocDraft] = useState(null) // location being added/edited
   const [vocabTerms, setVocabTerms] = useState([])
   const [vocabDraft, setVocabDraft] = useState(null) // vocab term being added/edited
+
+  const openUnits = useMemo(
+    () => units.filter((u) => classUnits[u.id]).sort((a, b) => a.unit_number - b.unit_number),
+    [units, classUnits]
+  )
+
+  // Builds a compact student-x-unit grid of scores instead of one row per
+  // student per unit, so a full class doesn't turn into hundreds of rows.
+  const progressMatrix = useMemo(() => {
+    const rows = progressMode === 'map' ? progress : vocabProgress
+    const byKey = {}
+    rows.forEach((r) => { byKey[`${r.student_id}:${r.unit_id}`] = r })
+
+    return roster.map((student) => ({
+      student,
+      cells: openUnits.map((unit) => {
+        const row = byKey[`${student.id}:${unit.id}`]
+        if (!row || !row.total_count) return { unitId: unit.id, pct: null }
+        const numerator = progressMode === 'map' ? row.mastered_count : Number(row.total_credit)
+        const pct = Math.round((numerator / row.total_count) * 100)
+        return { unitId: unit.id, pct }
+      }),
+    }))
+  }, [roster, openUnits, progress, vocabProgress, progressMode])
+
+  function pctColor(pct) {
+    if (pct === null) return 'text-ink/30'
+    if (pct >= 80) return 'text-forest font-semibold'
+    if (pct >= 50) return 'text-brass font-semibold'
+    return 'text-rust font-semibold'
+  }
 
   useEffect(() => { init() }, [])
 
@@ -324,50 +356,47 @@ export default function TeacherDashboard() {
               </div>
 
               <div className="bg-white/70 border border-brass/30 rounded-xl p-5 overflow-x-auto">
-                <h3 className="font-serif text-lg font-bold mb-3">Progress — Map Quest</h3>
-                {progress.length === 0 ? (
-                  <p className="text-sm text-ink/50">No progress yet.</p>
-                ) : (
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-ink/50">
-                        <th className="pb-2 pr-4">Student</th>
-                        <th className="pb-2 pr-4">Unit</th>
-                        <th className="pb-2">Mastered</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {progress.filter((p) => p.total_count > 0 && classUnits[p.unit_id]).map((p, i) => (
-                        <tr key={i} className="border-t border-brass/10">
-                          <td className="py-1 pr-4">{p.student_name}</td>
-                          <td className="py-1 pr-4">Unit {p.unit_number}</td>
-                          <td className="py-1">{p.mastered_count} / {p.total_count}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-serif text-lg font-bold">Progress</h3>
+                  <div className="flex gap-1 p-1 bg-white/60 rounded-lg">
+                    <button
+                      onClick={() => setProgressMode('map')}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold ${progressMode === 'map' ? 'bg-navy text-parchment' : 'text-ink/60'}`}
+                    >
+                      🗺️ Map Quest
+                    </button>
+                    <button
+                      onClick={() => setProgressMode('vocab')}
+                      className={`px-3 py-1 rounded-md text-xs font-semibold ${progressMode === 'vocab' ? 'bg-navy text-parchment' : 'text-ink/60'}`}
+                    >
+                      📚 Vocabulary
+                    </button>
+                  </div>
+                </div>
 
-              <div className="bg-white/70 border border-brass/30 rounded-xl p-5 overflow-x-auto">
-                <h3 className="font-serif text-lg font-bold mb-3">Progress — Vocabulary</h3>
-                {vocabProgress.length === 0 ? (
-                  <p className="text-sm text-ink/50">No progress yet.</p>
+                {openUnits.length === 0 ? (
+                  <p className="text-sm text-ink/50">Open a unit above to start tracking progress.</p>
+                ) : roster.length === 0 ? (
+                  <p className="text-sm text-ink/50">Add students to the roster to start tracking progress.</p>
                 ) : (
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-ink/50">
-                        <th className="pb-2 pr-4">Student</th>
-                        <th className="pb-2 pr-4">Unit</th>
-                        <th className="pb-2">Mastered</th>
+                        <th className="pb-2 pr-4 sticky left-0 bg-white/0">Student</th>
+                        {openUnits.map((u) => (
+                          <th key={u.id} className="pb-2 px-3 text-center whitespace-nowrap">U{u.unit_number}</th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {vocabProgress.filter((p) => p.total_count > 0 && classUnits[p.unit_id]).map((p, i) => (
-                        <tr key={i} className="border-t border-brass/10">
-                          <td className="py-1 pr-4">{p.student_name}</td>
-                          <td className="py-1 pr-4">Unit {p.unit_number}</td>
-                          <td className="py-1">{p.mastered_count} / {p.total_count}</td>
+                      {progressMatrix.map((row) => (
+                        <tr key={row.student.id} className="border-t border-brass/10">
+                          <td className="py-1.5 pr-4 whitespace-nowrap">{row.student.name}</td>
+                          {row.cells.map((cell) => (
+                            <td key={cell.unitId} className={`py-1.5 px-3 text-center ${pctColor(cell.pct)}`}>
+                              {cell.pct === null ? '–' : `${cell.pct}%`}
+                            </td>
+                          ))}
                         </tr>
                       ))}
                     </tbody>
