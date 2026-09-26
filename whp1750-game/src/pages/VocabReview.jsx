@@ -75,17 +75,37 @@ export default function VocabReview() {
 
   const resolvedCount = allTerms.filter(isResolved).length
 
-  function handlePick(option) {
+  async function handlePick(option) {
     if (feedback || !quiz || !currentQuestion) return
     const correct = option.term_id === currentQuestion.term_id
     setFeedback({ chosenId: option.term_id, correct })
 
-    supabase.rpc('whp_record_vocab_progress', {
+    const { data: recorded, error: recordErr } = await supabase.rpc('whp_record_vocab_progress', {
       p_student_id: session.student_id,
       p_session_token: session.session_token,
       p_term_id: currentQuestion.term_id,
       p_correct: correct,
     })
+
+    if (recordErr || recorded === false) {
+      // Don't advance silently on a failed save — the term would just
+      // come back as "unresolved" and repeat. Log it so it's visible in
+      // the browser console if this keeps happening.
+      console.error('Vocab progress did not save:', recordErr?.message || 'session invalid or expired')
+    } else {
+      // Reflect this attempt locally right away, so the progress bar and
+      // "reviewed" count move immediately instead of only at lesson end.
+      setAllTerms((prev) => prev.map((t) => {
+        if (t.term_id !== currentQuestion.term_id) return t
+        const newCredit = correct ? (t.attempts === 0 ? 1 : 0.5) : 0
+        return {
+          ...t,
+          attempts: t.attempts + 1,
+          mastered: t.mastered || correct,
+          credit: Math.max(Number(t.credit), newCredit),
+        }
+      }))
+    }
 
     setTimeout(() => {
       const newMissed = correct ? quiz.missed : [...quiz.missed, currentQuestion]
