@@ -50,17 +50,30 @@ export default function StudentUnits() {
 
       <div className="grid sm:grid-cols-2 gap-4">
         {units.map((u) => (
-          <button
+          <div
             key={u.unit_id}
-            onClick={() => navigate(`/play/${u.unit_id}`)}
-            className="text-left bg-white/70 border border-brass/30 rounded-xl p-5 shadow hover:shadow-md hover:-translate-y-0.5 transition"
+            className="bg-white/70 border border-brass/30 rounded-xl p-5 shadow"
           >
             <p className="text-xs uppercase tracking-wide text-brass font-semibold">
               Unit {u.unit_number}
             </p>
             <p className="font-serif text-xl font-bold text-ink mt-1">{u.title}</p>
-            <p className="text-sm text-ink/60 mt-1">{u.years}</p>
-          </button>
+            <p className="text-sm text-ink/60 mt-1 mb-4">{u.years}</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => navigate(`/play/${u.unit_id}`)}
+                className="flex-1 py-2 rounded-lg bg-rust text-parchment text-sm font-semibold"
+              >
+                🗺️ Map Quest
+              </button>
+              <button
+                onClick={() => navigate(`/vocab/${u.unit_id}`)}
+                className="flex-1 py-2 rounded-lg bg-navy text-parchment text-sm font-semibold"
+              >
+                📚 Vocabulary
+              </button>
+            </div>
+          </div>
         ))}
       </div>
     </div>
